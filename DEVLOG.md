@@ -1,6 +1,6 @@
 # DEVLOG
 2026-10-30 — создан репозиторий, добавлены SPEC.md и AGENTS.md, папка docs/prompts
-2026-10-30 11:45:00 UTC — Этап 1: Создан проектный каркас (Stage 1 project scaffold)
+2026-10-30 17:20:00 (UTC+5) — Этап 1: Создан проектный каркас (Stage 1 project scaffold)
 - Создана структура backend/app (main.py, config.py, db.py, models.py).
 - Настроена конфигурация через pydantic-settings (.env.example).
 - Реализованы SQLAlchemy 2 модели для таблиц events, registrations, notifications со всеми индексами из SPEC §4.
