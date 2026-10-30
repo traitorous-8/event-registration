@@ -29,11 +29,13 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    - MailHog on port `1025` (SMTP) and `8025` (Web UI at `http://localhost:8025`)
    - FastAPI Backend on `http://localhost:8000` (runs migrations automatically on startup)
 
-3. Health check endpoint:
-   ```bash
-   curl http://localhost:8000/health
-   # Returns: {"status":"ok"}
-   ```
+3. Endpoints:
+   - `GET /health` -> `{"status": "ok"}`
+   - `POST /api/events` -> Create an event (`{title, description, starts_at, capacity}`) -> returns event data with `organizer_secret`
+   - `GET /api/events` -> List all public events (with `confirmed_count` and `waitlist_count`)
+   - `GET /api/events/{id}` -> Public details for a specific event
+   - `POST /api/events/{id}/registrations` -> Register for an event (`{email}`) -> returns `{status, ticket_code}`
+   - `GET /api/tickets/{code}` -> Get ticket status, position in waitlist (if waitlisted), and event details
 
 ## Local Development & Running Tests
 

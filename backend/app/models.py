@@ -10,7 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -31,7 +31,12 @@ class Event(Base):
     starts_at = Column(DateTime(timezone=True), nullable=False)
     capacity = Column(Integer, nullable=False)
     organizer_secret = Column(String(255), nullable=False, unique=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        server_default=func.now(),
+    )
 
     registrations = relationship("Registration", back_populates="event", cascade="all, delete-orphan")
 
@@ -48,9 +53,19 @@ class Registration(Base):
     email = Column(String(255), nullable=False)
     ticket_code = Column(String(255), nullable=False, unique=True, index=True)
     status = Column(String(50), nullable=False)  # confirmed, waitlist, cancelled
-    queued_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    queued_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        server_default=func.now(),
+    )
     checked_in_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        server_default=func.now(),
+    )
 
     event = relationship("Event", back_populates="registrations")
     notifications = relationship("Notification", back_populates="registration", cascade="all, delete-orphan")
@@ -58,6 +73,14 @@ class Registration(Base):
     __table_args__ = (
         Index("uq_registrations_event_id_email", "event_id", "email", unique=True),
         Index("ix_registrations_queue", "event_id", "status", "queued_at", "id"),
+        CheckConstraint(
+            "status IN ('confirmed', 'waitlist', 'cancelled')",
+            name="check_registration_status_valid",
+        ),
+        CheckConstraint(
+            "email = lower(email)",
+            name="check_registration_email_lowercased",
+        ),
     )
 
 
@@ -71,11 +94,20 @@ class Notification(Base):
     payload = Column(JSONB, nullable=False, default=dict)
     status = Column(String(50), nullable=False, default="pending")  # pending, sent, failed
     attempts = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        server_default=func.now(),
+    )
     sent_at = Column(DateTime(timezone=True), nullable=True)
 
     registration = relationship("Registration", back_populates="notifications")
 
     __table_args__ = (
         Index("uq_notifications_registration_kind_dedup", "registration_id", "kind", "dedup_key", unique=True),
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'failed')",
+            name="check_notification_status_valid",
+        ),
     )
