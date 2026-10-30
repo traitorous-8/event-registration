@@ -9,7 +9,7 @@
 - Добавлены автотесты (backend/tests): проверка /health, применение миграций на чистой БД, уникальность (event_id, email) в registrations и (registration_id, kind, dedup_key) в notifications.
 - Настроен CI GitHub Actions (.github/workflows/ci.yml) с сервисом Postgres 16.
 - Обновлены README.md и DEVLOG.md.
-2026-10-30 12:45:00 UTC — Этап 2: События и регистрация с блокировкой и листом ожидания (Stage 2)
+2026-10-30 20:35:00 (UTC+5) — Этап 2: События и регистрация с блокировкой и листом ожидания (Stage 2)
 - Добавлена Alembic-миграция (07fbb1c5f2d2) с CHECK-ограничениями (status IN ..., email = lower(email)) и server_default=now() для created_at и queued_at.
 - Реализованы Pydantic-схемы (schemas.py) для создания/получения событий, регистрации и просмотра билетов.
 - Написана бизнес-логика регистрации (services/registration.py) с подзапросом блокировки строки SELECT ... FOR UPDATE на событии в единой транзакции:
