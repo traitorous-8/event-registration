@@ -59,3 +59,7 @@ class TicketResponse(BaseModel):
     ticket_code: str
     position_in_waitlist: Optional[int] = None
     event: EventResponse
+
+
+class TicketCancelResponse(BaseModel):
+    status: str = "cancelled"
