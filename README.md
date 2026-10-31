@@ -28,6 +28,7 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    - PostgreSQL 16 on port `5432`
    - MailHog on port `1025` (SMTP) and `8025` (Web UI at `http://localhost:8025`)
    - FastAPI Backend on `http://localhost:8000` (runs migrations automatically on startup)
+   - Outbox Email Worker (running `python -m backend.app.workers.outbox` to deliver emails via MailHog)
 
 3. Endpoints:
    - `GET /health` -> `{"status": "ok"}`
@@ -58,6 +59,21 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    pytest -v
    ```
 
+4. Run the Outbox Worker locally:
+   ```bash
+   python -m backend.app.workers.outbox
+   ```
+   Sent emails can be viewed in the MailHog web interface at `http://localhost:8025`.
+
+## Environment Variables
+
+- `DATABASE_URL`: PostgreSQL connection URL (e.g. `postgresql://postgres:postgres@localhost:5432/event_registration`).
+- `SMTP_HOST`: Host of the SMTP server (default: `localhost`, in docker-compose: `mailhog`).
+- `SMTP_PORT`: Port of the SMTP server (default: `1025`).
+- `SMTP_FROM`: Sender email address (default: `noreply@events.local`).
+- `OUTBOX_POLL_SECONDS`: Polling interval in seconds for the outbox worker (default: `2.0`).
+- `OUTBOX_BATCH_SIZE`: Batch size for picking pending notifications (default: `20`).
+
 ## Known limitations
 
 - **Ticket code in registration response:** The ticket code is returned directly in the registration API response, and there is no email confirmation sent on registration (this is a demo simplification; in a real product it would only be sent by email).
@@ -72,10 +88,11 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
   - Registration with capacity limits, waitlist positioning, and idempotent re-registration (`POST /api/events/{id}/registrations`).
   - Ticket details retrieval (`GET /api/tickets/{code}`).
   - Ticket cancellation (`DELETE /api/tickets/{code}`) with atomic waitlist promotion and outbox notification.
+  - Outbox email sending worker (`backend/app/workers/outbox.py`) delivering plain-text Russian emails via SMTP (MailHog) with retry handling and `FOR UPDATE SKIP LOCKED`.
+  - Email templates (`backend/app/workers/templates.py`) formatting dates in UTC and Asia/Almaty timezones.
   - Pessimistic locking (`SELECT ... FOR UPDATE` with event-first lock order) ensuring safe concurrency under race conditions.
-  - Comprehensive race condition tests with barrier-synchronized concurrency.
+  - Comprehensive race condition and outbox delivery tests with barrier-synchronized concurrency.
 - **Not implemented yet:**
-  - Outbox email sending worker and MailHog integration (Stage 4).
   - Scheduler for 24h event reminders and event rescheduling notifications (Stage 5).
   - Single check-in logic, organizer participant views, and SSE live counters (Stage 6).
   - Frontend UI (Stage 7).
