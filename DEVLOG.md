@@ -44,3 +44,7 @@ Hardening тестов гонок (часть A):
 - Тесты с threading.Barrier и повторениями в backend/tests/test_stage3_cancellation.py.
 - Обновлены README.md и DEVLOG.md.
 - Промпт этапа 3 (docs/prompts/03-cancel-waitlist.md) сохранён до запуска в Jules.
+
+## 2026-10-31 21:58 (UTC+5) — Ручная проверка этапов 1–3
+- `docker compose up -d --build` проверен на Windows (Docker Desktop): миграции применились, `/health` отвечает `{"status":"ok"}`.
+- Сценарий через Swagger: событие на 1 место, регистрация a@test.com (confirmed), b@test.com (waitlist), отмена билета a, билет b стал confirmed, счётчики сошлись.
