@@ -36,6 +36,7 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    - `GET /api/events/{id}` -> Public details for a specific event
    - `POST /api/events/{id}/registrations` -> Register for an event (`{email}`) -> returns `{status, ticket_code}`
    - `GET /api/tickets/{code}` -> Get ticket status, position in waitlist (if waitlisted), and event details
+   - `DELETE /api/tickets/{code}` -> Cancel registration (idempotent, promotes earliest waitlist participant if confirmed)
 
 ## Local Development & Running Tests
 
@@ -56,3 +57,25 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    cd backend
    pytest -v
    ```
+
+## Known limitations
+
+- **Ticket code in registration response:** The ticket code is returned directly in the registration API response, and there is no email confirmation sent on registration (this is a demo simplification; in a real product it would only be sent by email).
+- **In-process live-update bus:** The live-update notification bus is currently in-process, which limits backend deployment to a single uvicorn worker process.
+- **Outbox delivery window:** The transactional outbox has a small window between sending an email and marking it sent in the database (at-least-once delivery, deduplicated by the unique key constraint on `(registration_id, kind, dedup_key)`).
+
+## Current state
+
+- **Implemented:**
+  - Database schema, Alembic migrations, constraints, and indexes for `events`, `registrations`, and `notifications`.
+  - Event creation and listing (`POST /api/events`, `GET /api/events`, `GET /api/events/{id}`).
+  - Registration with capacity limits, waitlist positioning, and idempotent re-registration (`POST /api/events/{id}/registrations`).
+  - Ticket details retrieval (`GET /api/tickets/{code}`).
+  - Ticket cancellation (`DELETE /api/tickets/{code}`) with atomic waitlist promotion and outbox notification.
+  - Pessimistic locking (`SELECT ... FOR UPDATE` with event-first lock order) ensuring safe concurrency under race conditions.
+  - Comprehensive race condition tests with barrier-synchronized concurrency.
+- **Not implemented yet:**
+  - Outbox email sending worker and MailHog integration (Stage 4).
+  - Scheduler for 24h event reminders and event rescheduling notifications (Stage 5).
+  - Single check-in logic, organizer participant views, and SSE live counters (Stage 6).
+  - Frontend UI (Stage 7).

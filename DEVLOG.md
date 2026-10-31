@@ -9,6 +9,25 @@
 - Добавлены автотесты (backend/tests): проверка /health, применение миграций на чистой БД, уникальность (event_id, email) в registrations и (registration_id, kind, dedup_key) в notifications.
 - Настроен CI GitHub Actions (.github/workflows/ci.yml) с сервисом Postgres 16.
 - Обновлены README.md и DEVLOG.md.
+2026-10-31 12:55:00 UTC — Этап 3: Отказ и повышение из очереди (Stage 3 Part A & B)
+- Hardening тестов гонок (Part A):
+  - Переведены конкурентные тесты в `backend/tests/test_stage2_registration.py` на `threading.Barrier` для синхронного запуска запросов.
+  - Тест регистрации двух участников на последнее место запущен в цикле из 20 итераций.
+  - Удалены неиспользуемые переменные `Session`/`sessionmaker` и устаревшие комментарии.
+  - Проверена реакция тестов при снятии `.with_for_update()`: гонки выявляются стабильными падениями тестов.
+  - В README добавлены разделы «Known limitations» и честный «Current state».
+- Отказ и повышение из очереди (Part B, SPEC §5):
+  - Добавлен эндпоинт `DELETE /api/tickets/{code}`, возвращающий `{"status": "cancelled"}`.
+  - Реализован метод `cancel_registration` в `backend/app/services/registration.py` с соблюдением строгого порядка блокировок:
+    1. Чтение `event_id` билета;
+    2. Блокировка строки события `SELECT ... FROM events WHERE id=:id FOR UPDATE`;
+    3. Повторное чтение статуса билета под блокировкой (`db.expire(registration)`);
+    4. Для `confirmed`: перевод в `cancelled`, атомарный выбор первого участника листа ожидания по `(queued_at, id)`, перевод его в `confirmed` и создание outbox notification `waitlist_promoted` (`dedup_key='promoted'`) с `ON CONFLICT DO NOTHING`;
+    5. Для `waitlist`: перевод в `cancelled` без продвижения очереди;
+    6. Для `cancelled`: идемпотентный 200 no-op;
+    7. Неизвестный код билета -> 404, начавшееся событие -> 409.
+  - Написаны тесты с `threading.Barrier` и повторениями в `backend/tests/test_stage3_cancellation.py`.
+- Обновлены README.md и DEVLOG.md.
 2026-10-30 20:35:00 (UTC+5) — Этап 2: События и регистрация с блокировкой и листом ожидания (Stage 2)
 - Добавлена Alembic-миграция (07fbb1c5f2d2) с CHECK-ограничениями (status IN ..., email = lower(email)) и server_default=now() для created_at и queued_at.
 - Реализованы Pydantic-схемы (schemas.py) для создания/получения событий, регистрации и просмотра билетов.

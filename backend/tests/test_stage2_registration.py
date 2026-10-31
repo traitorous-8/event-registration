@@ -1,8 +1,7 @@
 import concurrent.futures
 from datetime import datetime, timedelta, timezone
+import threading
 import pytest
-from sqlalchemy import text
-from sqlalchemy.orm import sessionmaker
 
 from backend.app.models import Notification, Registration
 
@@ -63,16 +62,15 @@ def test_50_parallel_registrations_capacity_10(client, test_engine, migrated_db)
     event = create_event_via_api(client, title="Parallel Event", capacity=10)
     event_id = event["id"]
 
-    Session = sessionmaker(bind=test_engine)
+    barrier = threading.Barrier(50)
 
     def worker(idx):
-        # Separate DB session and client request per thread
-        c = client
         email = f"user_{idx}@test.com"
-        r = c.post(f"/api/events/{event_id}/registrations", json={"email": email})
+        barrier.wait()
+        r = client.post(f"/api/events/{event_id}/registrations", json={"email": email})
         return r.status_code, r.json()
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         futures = [executor.submit(worker, i) for i in range(50)]
         results = [f.result() for f in futures]
 
@@ -93,24 +91,28 @@ def test_50_parallel_registrations_capacity_10(client, test_engine, migrated_db)
 
 
 def test_2_parallel_registrations_last_seat(client, test_engine, migrated_db):
-    event = create_event_via_api(client, title="Last Seat Event", capacity=1)
-    event_id = event["id"]
+    for i in range(20):
+        event = create_event_via_api(client, title=f"Last Seat Event {i}", capacity=1)
+        event_id = event["id"]
 
-    def worker(email):
-        r = client.post(f"/api/events/{event_id}/registrations", json={"email": email})
-        return r.status_code, r.json()
+        barrier = threading.Barrier(2)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        f1 = executor.submit(worker, "userA@test.com")
-        f2 = executor.submit(worker, "userB@test.com")
-        res1 = f1.result()
-        res2 = f2.result()
+        def worker(email):
+            barrier.wait()
+            r = client.post(f"/api/events/{event_id}/registrations", json={"email": email})
+            return r.status_code, r.json()
 
-    assert res1[0] == 200 and res2[0] == 200
-    st1 = res1[1]["status"]
-    st2 = res2[1]["status"]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(worker, f"userA_{i}@test.com")
+            f2 = executor.submit(worker, f"userB_{i}@test.com")
+            res1 = f1.result()
+            res2 = f2.result()
 
-    assert sorted([st1, st2]) == ["confirmed", "waitlist"]
+        assert res1[0] == 200 and res2[0] == 200
+        st1 = res1[1]["status"]
+        st2 = res2[1]["status"]
+
+        assert sorted([st1, st2]) == ["confirmed", "waitlist"]
 
 
 def test_same_email_registered_10_times_in_parallel(client, test_engine, migrated_db, db_session):
@@ -118,8 +120,10 @@ def test_same_email_registered_10_times_in_parallel(client, test_engine, migrate
     event_id = event["id"]
 
     email = "same_email@test.com"
+    barrier = threading.Barrier(10)
 
     def worker():
+        barrier.wait()
         r = client.post(f"/api/events/{event_id}/registrations", json={"email": email})
         return r.status_code, r.json()
 
