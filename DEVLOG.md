@@ -26,22 +26,49 @@
 - Эндпоинты: POST /api/events, GET /api/events, GET /api/events/{id}, POST /api/events/{id}/registrations, GET /api/tickets/{code}.
 - Тесты: 50 параллельных регистраций на 10 мест, 2 параллельные на последнее место, 10 параллельных на один email, нормализация email, порядок очереди и позиция в листе ожидания, CHECK-ограничения.
 - Обновлены README.md и DEVLOG.md.
-- Ревью (владелец + Claude): логика registration.py соответствует SPEC. Замечания: тесты гонок без синхронного старта потоков (слабая доказательная сила) и нет проверки, что они падают без блокировки; код билета возвращается при повторной регистрации чужого email (упрощение для демо, вынесено в README как ограничение). PR #2 смержен. Промпт этапа 2 (docs/prompts/02-registration.md) сохранён в репозитории позже запуска.
-
-## 2026-10-31 17:55 (UTC+5) — Этап 3: отказ и повышение из очереди
-Hardening тестов гонок (часть A):
-- Конкурентные тесты в backend/tests/test_stage2_registration.py переведены на threading.Barrier для синхронного запуска запросов.
-- Тест двух регистраций на последнее место запущен в цикле из 20 итераций.
-- Удалены неиспользуемые Session/sessionmaker и устаревшие комментарии.
-- Проверка «зубов»: при снятом .with_for_update() тесты гонок стабильно падают (assert 13 == 10; ['confirmed','confirmed']; UniqueViolation).
-- В README добавлены разделы «Known limitations» и «Current state».
-
-Отказ и повышение из очереди (часть B, SPEC §5):
-- Эндпоинт DELETE /api/tickets/{code}, возвращает {"status": "cancelled"}.
-- cancel_registration в backend/app/services/registration.py со строгим порядком блокировок: чтение event_id билета, блокировка события FOR UPDATE, повторное чтение статуса под блокировкой (db.expire(registration)).
-- confirmed: перевод в cancelled, повышение первого из листа ожидания по (queued_at, id) в confirmed, outbox-запись waitlist_promoted (dedup_key='promoted') с ON CONFLICT DO NOTHING.
-- waitlist: перевод в cancelled без продвижения очереди. cancelled: идемпотентный 200 no-op. Неизвестный код: 404, начавшееся событие: 409.
-- Тесты с threading.Barrier и повторениями в backend/tests/test_stage3_cancellation.py.
+2026-10-31 17:25:00 UTC — Этап 4: Outbox worker и отправка писем через SMTP / MailHog (Stage 4)
+- Реализован шаблонизатор писем `backend/app/workers/templates.py`:
+  - Шаблоны на русском языке для 'ticket' и 'waitlist_promoted'.
+  - Отображение времени начала события одновременно в UTC и Asia/Almaty (`ZoneInfo("Asia/Almaty")`).
+  - Включение кода билета, статуса регистрации и инструкции по отказу через `DELETE /api/tickets/{code}`.
+  - Разные темы писем (Subject) для каждого типа уведомления.
+- Реализован фоновый воркер `backend/app/workers/outbox.py`:
+  - Выборка до `OUTBOX_BATCH_SIZE` записей `notifications` с `status='pending'` по `FOR UPDATE SKIP LOCKED`.
+  - Отправка email через стандартную библиотеку `smtplib` с фиксацией транзакции (`commit`) на каждое сообщение.
+  - Успешная отправка: `status='sent'`, `sent_at=now()`.
+  - Ошибки SMTP: `attempts += 1`, при достижении 5 неудачных попыток `status='failed'`.
+  - Неизвестный `kind`: запись помечается `status='failed'`, воркер логирует предупреждение и продолжает работу.
+  - Устойчивость к недоступности SMTP-сервера без падения процесса.
+- Настройки и зависимости:
+  - Добавлены параметры `SMTP_FROM`, `OUTBOX_POLL_SECONDS`, `OUTBOX_BATCH_SIZE` в `config.py` и `.env.example`.
+  - В `requirements.txt` добавлен `aiosmtpd==1.4.6`.
+- Добавлен сервис `worker` в `docker-compose.yml`, запускающий `python -m backend.app.workers.outbox` с зависимостями от postgres (healthy) и mailhog.
+- Автотесты `backend/tests/test_stage4_outbox.py`:
+  - Запуск реального in-process SMTP-сервера (`aiosmtpd.controller.Controller`) в тестовой фикстуре.
+  - Проверка доставки билета один раз и корректности заполнения полей `status='sent'` и `sent_at`.
+  - Параллельная обработка двумя воркерами (с `threading.Barrier`) без дублирования отправки.
+  - Проверка повторных попыток при недоступности SMTP и переход в `status='failed'` после 5 ошибок, а также успешная доставка после восстановления сервера.
+  - Сквозной тест (end-to-end): регистрация двух участников на 1 место, отмена первого билета, запуск воркера и фиксация ровно 3 писем (2 ticket + 1 waitlist_promoted).
+  - Проверка холостого запуска при пустом outbox.
+  - Обработка неизвестного `kind` с переводом в `status='failed'` без падения воркера.
+- Обновлены README.md и DEVLOG.md.
+2026-10-30 20:35:00 (UTC+5) — Этап 2: События и регистрация с блокировкой и листом ожидания (Stage 2)
+- Добавлена Alembic-миграция (07fbb1c5f2d2) с CHECK-ограничениями (status IN ..., email = lower(email)) и server_default=now() для created_at и queued_at.
+- Реализованы Pydantic-схемы (schemas.py) для создания/получения событий, регистрации и просмотра билетов.
+- Написана бизнес-логика регистрации (services/registration.py) с подзапросом блокировки строки SELECT ... FOR UPDATE на событии в единой транзакции:
+  - Автоматическое определение статуса confirmed / waitlist по capacity события.
+  - Обработка повторной регистрации (возврат существующего билета для активного пользователя).
+  - Реактивация отменённой регистрации (перевод в конец очереди с новыми queued_at = now()).
+  - Генерация ticket_code с secrets.token_urlsafe(9).
+  - Вставка записи outbox notification (kind='ticket', dedup_key='ticket') с ON CONFLICT DO NOTHING.
+- Реализованы API-эндпоинты POST /api/events, GET /api/events, GET /api/events/{id}, POST /api/events/{id}/registrations, GET /api/tickets/{code}.
+- Добавлены интеграционные и конкурентные тесты (backend/tests):
+  - 50 параллельных регистраций на 10 мест (ровно 10 confirmed, 40 waitlist).
+  - 2 параллельные регистрации на последнее место.
+  - 10 параллельных повторных регистраций на 1 email.
+  - Нормализация email (trim + lower).
+  - Порядок очереди и позиция в листе ожидания.
+  - Проверка срабатывания CHECK-ограничений в БД.
 - Обновлены README.md и DEVLOG.md.
 - Промпт этапа 3 (docs/prompts/03-cancel-waitlist.md) сохранён до запуска в Jules.
 

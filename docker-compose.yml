@@ -35,11 +35,34 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/event_registration
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
+      SMTP_FROM: noreply@events.local
+      OUTBOX_POLL_SECONDS: 2
+      OUTBOX_BATCH_SIZE: 20
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: event_registration_worker
+    restart: always
+    command: python -m backend.app.workers.outbox
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/event_registration
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@events.local
+      OUTBOX_POLL_SECONDS: 2
+      OUTBOX_BATCH_SIZE: 20
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
 
 volumes:
   postgres_data:
