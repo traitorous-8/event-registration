@@ -214,8 +214,8 @@ def cancel_registration(db: Session, code: str) -> dict:
         return {"status": "cancelled"}
 
     if registration.status == "confirmed":
-        # DELETE /api/tickets/{code} on a confirmed registration that is already checked in returns 409
-        # (a person who attended cannot cancel); the seat is not released and nobody is promoted.
+        # Cancelling a confirmed registration that is already checked in returns 409;
+        # the seat is not released and nobody is promoted.
         if registration.checked_in_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

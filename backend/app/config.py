@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     smtp_from: str = "noreply@events.local"
     outbox_poll_seconds: float = 2.0
     outbox_batch_size: int = 20
+    scheduler_poll_seconds: float = 30.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
