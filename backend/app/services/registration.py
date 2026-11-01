@@ -125,7 +125,7 @@ def get_ticket_details(db: Session, code: str) -> dict:
         )
 
     event = registration.event
-    confirmed_count, waitlist_count = get_event_counts(db, event.id)
+    confirmed_count, waitlist_count, _ = get_event_counts(db, event.id)
 
     position_in_waitlist = None
     if registration.status == "waitlist":
@@ -214,6 +214,14 @@ def cancel_registration(db: Session, code: str) -> dict:
         return {"status": "cancelled"}
 
     if registration.status == "confirmed":
+        # DELETE /api/tickets/{code} on a confirmed registration that is already checked in returns 409
+        # (a person who attended cannot cancel); the seat is not released and nobody is promoted.
+        if registration.checked_in_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot cancel a registration that has already checked in",
+            )
+
         # status confirmed -> set cancelled, then in SAME transaction promote first waitlist registration
         registration.status = "cancelled"
 
@@ -258,7 +266,7 @@ def _create_waitlist_promoted_notification(
     db.execute(stmt)
 
 
-def get_event_counts(db: Session, event_id: int) -> Tuple[int, int]:
+def get_event_counts(db: Session, event_id: int) -> Tuple[int, int, int]:
     confirmed_count = (
         db.query(func.count(Registration.id))
         .filter(Registration.event_id == event_id, Registration.status == "confirmed")
@@ -269,4 +277,13 @@ def get_event_counts(db: Session, event_id: int) -> Tuple[int, int]:
         .filter(Registration.event_id == event_id, Registration.status == "waitlist")
         .scalar() or 0
     )
-    return confirmed_count, waitlist_count
+    checked_in_count = (
+        db.query(func.count(Registration.id))
+        .filter(
+            Registration.event_id == event_id,
+            Registration.status == "confirmed",
+            Registration.checked_in_at.isnot(None),
+        )
+        .scalar() or 0
+    )
+    return confirmed_count, waitlist_count, checked_in_count

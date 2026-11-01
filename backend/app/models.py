@@ -92,7 +92,7 @@ class Notification(Base):
     kind = Column(String(100), nullable=False)
     dedup_key = Column(String(255), nullable=False)
     payload = Column(JSONB, nullable=False, default=dict)
-    status = Column(String(50), nullable=False, default="pending")  # pending, sent, failed, skipped
+    status = Column(String(50), nullable=False, default="pending")  # pending, sent, failed
     attempts = Column(Integer, nullable=False, default=0)
     created_at = Column(
         DateTime(timezone=True),
@@ -107,7 +107,7 @@ class Notification(Base):
     __table_args__ = (
         Index("uq_notifications_registration_kind_dedup", "registration_id", "kind", "dedup_key", unique=True),
         CheckConstraint(
-            "status IN ('pending', 'sent', 'failed', 'skipped')",
+            "status IN ('pending', 'sent', 'failed')",
             name="check_notification_status_valid",
         ),
     )

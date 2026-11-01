@@ -64,24 +64,5 @@ services:
       mailhog:
         condition: service_started
 
-  scheduler:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    container_name: event_registration_scheduler
-    restart: always
-    command: python -m backend.app.workers.scheduler
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/event_registration
-      SMTP_HOST: mailhog
-      SMTP_PORT: 1025
-      SMTP_FROM: noreply@events.local
-      OUTBOX_POLL_SECONDS: 2
-      OUTBOX_BATCH_SIZE: 20
-      SCHEDULER_POLL_SECONDS: 30
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   postgres_data:
