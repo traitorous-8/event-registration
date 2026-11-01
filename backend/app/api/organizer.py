@@ -7,10 +7,30 @@ from sqlalchemy.orm import Session
 
 from backend.app.db import get_db
 from backend.app.models import Event, Notification, Registration
-from backend.app.schemas import EventReschedule, EventResponse
+from sqlalchemy import func, text
+from backend.app.schemas import (
+    CheckInRequest,
+    CheckInResponse,
+    EventReschedule,
+    EventResponse,
+    OrganizerCounters,
+    OrganizerParticipant,
+    OrganizerViewResponse,
+)
 from backend.app.services.registration import get_event_counts
 
 router = APIRouter(prefix="/api/organizer", tags=["organizer"])
+
+
+def _get_event_by_secret(db: Session, secret: str) -> Event:
+    events = db.query(Event).all()
+    for ev in events:
+        if secrets.compare_digest(ev.organizer_secret, secret):
+            return ev
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Event not found",
+    )
 
 
 @router.patch("/{secret}", response_model=EventResponse)
@@ -143,4 +163,138 @@ def reschedule_event(
         created_at=event.created_at,
         confirmed_count=confirmed_count,
         waitlist_count=waitlist_count,
+    )
+
+
+@router.post("/{secret}/checkin", response_model=CheckInResponse)
+def checkin_participant(
+    secret: str,
+    payload: CheckInRequest,
+    db: Session = Depends(get_db),
+):
+    event = _get_event_by_secret(db, secret)
+
+    # One atomic statement: UPDATE registrations SET checked_in_at=now()
+    # WHERE ticket_code=:c AND event_id=:event AND status='confirmed' AND checked_in_at IS NULL
+    # RETURNING email, ticket_code, checked_in_at.
+    # Never SELECT-then-UPDATE.
+    checkin_sql = text("""
+        UPDATE registrations
+        SET checked_in_at = now()
+        WHERE ticket_code = :ticket_code
+          AND event_id = :event_id
+          AND status = 'confirmed'
+          AND checked_in_at IS NULL
+        RETURNING email, ticket_code, checked_in_at
+    """)
+
+    result = db.execute(
+        checkin_sql,
+        {"ticket_code": payload.ticket_code, "event_id": event.id},
+    ).mappings().first()
+
+    if result:
+        db.commit()
+        return CheckInResponse(
+            email=result["email"],
+            ticket_code=result["ticket_code"],
+            checked_in_at=result["checked_in_at"],
+        )
+
+    # If no row was updated, find out why with a follow-up read:
+    # 404 (code unknown or belongs to another event),
+    # 409 (already checked in, include checked_in_at),
+    # 422 (not 'confirmed').
+    reg = (
+        db.query(Registration)
+        .filter(
+            Registration.ticket_code == payload.ticket_code,
+            Registration.event_id == event.id,
+        )
+        .first()
+    )
+
+    if not reg:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket not found for this event",
+        )
+
+    if reg.checked_in_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Ticket already checked in at {reg.checked_in_at.isoformat()}",
+        )
+
+    if reg.status != "confirmed":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Ticket status is '{reg.status}', only 'confirmed' tickets can be checked in",
+        )
+
+    # Fallback if none matched
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Check-in failed",
+    )
+
+
+@router.get("/{secret}", response_model=OrganizerViewResponse)
+def get_organizer_view(
+    secret: str,
+    db: Session = Depends(get_db),
+):
+    event = _get_event_by_secret(db, secret)
+
+    confirmed_count, waitlist_count = get_event_counts(db, event.id)
+    checked_in_count = (
+        db.query(func.count(Registration.id))
+        .filter(
+            Registration.event_id == event.id,
+            Registration.status == "confirmed",
+            Registration.checked_in_at.isnot(None),
+        )
+        .scalar()
+        or 0
+    )
+
+    participants_rows = (
+        db.query(Registration)
+        .filter(Registration.event_id == event.id)
+        .order_by(Registration.queued_at.asc(), Registration.id.asc())
+        .all()
+    )
+
+    participants = [
+        OrganizerParticipant(
+            email=r.email,
+            status=r.status,
+            ticket_code=r.ticket_code,
+            queued_at=r.queued_at,
+            checked_in_at=r.checked_in_at,
+        )
+        for r in participants_rows
+    ]
+
+    event_data = EventResponse(
+        id=event.id,
+        title=event.title,
+        description=event.description,
+        starts_at=event.starts_at,
+        capacity=event.capacity,
+        created_at=event.created_at,
+        confirmed_count=confirmed_count,
+        waitlist_count=waitlist_count,
+    )
+
+    counters = OrganizerCounters(
+        confirmed=confirmed_count,
+        waitlist=waitlist_count,
+        checked_in=checked_in_count,
+    )
+
+    return OrganizerViewResponse(
+        event=event_data,
+        counters=counters,
+        participants=participants,
     )

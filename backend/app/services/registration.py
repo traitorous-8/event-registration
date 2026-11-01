@@ -207,6 +207,12 @@ def cancel_registration(db: Session, code: str) -> dict:
         # status cancelled -> 200 no-op, no second promotion
         return {"status": "cancelled"}
 
+    if registration.status == "confirmed" and registration.checked_in_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Registration is already checked in and cannot be cancelled",
+        )
+
     if registration.status == "waitlist":
         # status waitlist -> set cancelled, no promotion
         registration.status = "cancelled"

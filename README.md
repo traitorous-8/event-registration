@@ -37,7 +37,10 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    - `GET /api/events/{id}` -> Public details for a specific event
    - `POST /api/events/{id}/registrations` -> Register for an event (`{email}`) -> returns `{status, ticket_code}`
    - `GET /api/tickets/{code}` -> Get ticket status, position in waitlist (if waitlisted), and event details
-   - `DELETE /api/tickets/{code}` -> Cancel registration (idempotent, promotes earliest waitlist participant if confirmed)
+   - `DELETE /api/tickets/{code}` -> Cancel registration (idempotent, promotes earliest waitlist participant if confirmed; returns 409 if already checked in)
+   - `POST /api/organizer/{secret}/checkin` -> Check in participant by ticket code (`{ticket_code}`) -> 200 on success, 404 (unknown or wrong event), 409 (already checked in), 422 (not confirmed)
+   - `GET /api/organizer/{secret}` -> Organizer view with event details, live counters (`confirmed`, `waitlist`, `checked_in`), and participant list ordered by `(queued_at, id)`
+   - `PATCH /api/organizer/{secret}` -> Reschedule event (`{starts_at}`)
 
 ## Local Development & Running Tests
 
@@ -115,13 +118,15 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
   - Event creation and listing (`POST /api/events`, `GET /api/events`, `GET /api/events/{id}`).
   - Registration with capacity limits, waitlist positioning, and idempotent re-registration (`POST /api/events/{id}/registrations`).
   - Ticket details retrieval (`GET /api/tickets/{code}`).
-  - Ticket cancellation (`DELETE /api/tickets/{code}`) with atomic waitlist promotion and outbox notification.
+  - Ticket cancellation (`DELETE /api/tickets/{code}`) with atomic waitlist promotion and outbox notification, blocking cancellation for checked-in participants with 409 Conflict.
+  - Participant check-in endpoint (`POST /api/organizer/{secret}/checkin`) executing atomic single-statement SQL UPDATE RETURNING, with granular 404/409/422 diagnostics.
+  - Organizer event view (`GET /api/organizer/{secret}`) with event details, counters (`confirmed`, `waitlist`, `checked_in`), and ordered participant list (`(queued_at, id)`).
   - Outbox email sending worker (`backend/app/workers/outbox.py`) delivering plain-text Russian emails via SMTP (MailHog) with retry handling and `FOR UPDATE SKIP LOCKED`.
   - Scheduler worker (`backend/app/workers/scheduler.py`) for automated 24h reminders and catch-up on restart.
   - Event rescheduling endpoint (`PATCH /api/organizer/{secret}`) with atomic cancellation/skipping of outdated reminders and rescheduling notices.
   - Email templates (`backend/app/workers/templates.py`) formatting dates in UTC and Asia/Almaty timezones for tickets, promotions, 24h reminders, and rescheduling notices.
   - Pessimistic locking (`SELECT ... FOR UPDATE` with event-first lock order) ensuring safe concurrency under race conditions.
-  - Comprehensive race condition and outbox delivery tests with barrier-synchronized concurrency.
+  - Comprehensive race condition, barrier-synchronized concurrency tests, and check-in tests.
 - **Not implemented yet:**
-  - Single check-in logic, organizer participant views, and SSE live counters (Stage 6).
+  - SSE live counters and stream endpoints (Stage 6b).
   - Frontend UI (Stage 7).

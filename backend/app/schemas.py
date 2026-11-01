@@ -76,3 +76,37 @@ class TicketResponse(BaseModel):
 
 class TicketCancelResponse(BaseModel):
     status: str = "cancelled"
+
+
+class CheckInRequest(BaseModel):
+    ticket_code: str
+
+
+class CheckInResponse(BaseModel):
+    email: EmailStr
+    ticket_code: str
+    checked_in_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizerCounters(BaseModel):
+    confirmed: int
+    waitlist: int
+    checked_in: int
+
+
+class OrganizerParticipant(BaseModel):
+    email: str
+    status: str
+    ticket_code: str
+    queued_at: datetime
+    checked_in_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizerViewResponse(BaseModel):
+    event: EventResponse
+    counters: OrganizerCounters
+    participants: list[OrganizerParticipant]
