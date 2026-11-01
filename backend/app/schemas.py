@@ -43,6 +43,19 @@ class EventCreateResponse(EventResponse):
     organizer_secret: str
 
 
+class EventReschedule(BaseModel):
+    starts_at: datetime
+
+    @field_validator("starts_at")
+    @classmethod
+    def validate_starts_at(cls, v: datetime) -> datetime:
+        if v.tzinfo is None or v.tzinfo.utcoffset(v) is None:
+            raise ValueError("starts_at must be timezone-aware")
+        if v <= datetime.now(timezone.utc):
+            raise ValueError("starts_at must be in the future")
+        return v
+
+
 class RegistrationCreate(BaseModel):
     email: EmailStr
 

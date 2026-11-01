@@ -74,6 +74,19 @@ def process_notification(
         db.commit()
         return
 
+    # Before sending a 'reminder_24h' or 'event_rescheduled' notification re-check the registration;
+    # if it is 'cancelled' mark the notification 'skipped' and do not send.
+    if notif.kind in ("reminder_24h", "event_rescheduled") and registration.status == "cancelled":
+        logger.info(
+            "Notification %d (%s) skipped because registration %d is cancelled",
+            notif.id,
+            notif.kind,
+            registration.id,
+        )
+        notif.status = "skipped"
+        db.commit()
+        return
+
     event = (
         db.query(Event)
         .filter(Event.id == registration.event_id)

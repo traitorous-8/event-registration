@@ -73,6 +73,32 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
 - `SMTP_FROM`: Sender email address (default: `noreply@events.local`).
 - `OUTBOX_POLL_SECONDS`: Polling interval in seconds for the outbox worker (default: `2.0`).
 - `OUTBOX_BATCH_SIZE`: Batch size for picking pending notifications (default: `20`).
+- `SCHEDULER_POLL_SECONDS`: Polling interval in seconds for the reminder scheduler worker (default: `30.0`).
+
+## Scheduler & Rescheduling
+
+- **Reminder Scheduler (`backend/app/workers/scheduler.py`):**
+  - Runs in a loop polling every `SCHEDULER_POLL_SECONDS` (default: 30s).
+  - Finds all events where `now < starts_at <= now + 24h` and creates `reminder_24h` notifications with `dedup_key = starts_at (ISO)` for all `confirmed` registrations using `INSERT ... ON CONFLICT DO NOTHING`.
+  - Waitlist and cancelled registrations receive no reminder; if a waitlisted participant is promoted inside the 24h window, their reminder is created on the next tick.
+  - Events that already started are ignored. If the scheduler restarts after downtime, it catches up on pending reminders for future events without generating reminders for past events.
+  - Safe for multiple parallel scheduler instances without extra locking, relying on the database unique constraint on `(registration_id, kind, dedup_key)`.
+  - The tick logic is encapsulated in `run_tick(session, now)` allowing deterministic time injection in tests.
+
+- **Reschedule Endpoint (`PATCH /api/organizer/{secret}`):**
+  - Accepts `{starts_at: "<ISO datetime>"}`.
+  - Verifies organizer secret using constant-time comparison `secrets.compare_digest`; invalid secret returns `404 Not Found` (never exposing event existence).
+  - Validates `starts_at` is timezone-aware and in the future (returns `422` otherwise).
+  - If `starts_at` is identical to current event time, returns `200` as a no-op without creating notifications.
+  - In a single transaction under `SELECT ... FOR UPDATE` event lock:
+    1. Updates `starts_at`.
+    2. Marks pending `reminder_24h` notifications of this event whose `dedup_key` differs from the new date as `'skipped'`.
+    3. Inserts `event_rescheduled` notifications (dedup_key = new starts_at ISO) for all `confirmed` and `waitlist` registrations (`ON CONFLICT DO NOTHING`).
+  - Response returns the updated public event data, never exposing `organizer_secret`.
+
+- **Outbox Worker Re-check:**
+  - Before sending `reminder_24h` or `event_rescheduled` emails, the outbox worker re-checks the recipient's registration status. If it is `cancelled`, the notification is marked `'skipped'` and no email is sent.
+  - Plain-text Russian email templates format times in both UTC and `Asia/Almaty` timezones with distinct subjects for reminders and rescheduling.
 
 ## Known limitations
 
@@ -83,16 +109,17 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
 ## Current state
 
 - **Implemented:**
-  - Database schema, Alembic migrations, constraints, and indexes for `events`, `registrations`, and `notifications`.
+  - Database schema, Alembic migrations, constraints, and indexes for `events`, `registrations`, and `notifications` (including `'skipped'` status).
   - Event creation and listing (`POST /api/events`, `GET /api/events`, `GET /api/events/{id}`).
   - Registration with capacity limits, waitlist positioning, and idempotent re-registration (`POST /api/events/{id}/registrations`).
   - Ticket details retrieval (`GET /api/tickets/{code}`).
   - Ticket cancellation (`DELETE /api/tickets/{code}`) with atomic waitlist promotion and outbox notification.
   - Outbox email sending worker (`backend/app/workers/outbox.py`) delivering plain-text Russian emails via SMTP (MailHog) with retry handling and `FOR UPDATE SKIP LOCKED`.
-  - Email templates (`backend/app/workers/templates.py`) formatting dates in UTC and Asia/Almaty timezones.
+  - Scheduler worker (`backend/app/workers/scheduler.py`) for automated 24h reminders and catch-up on restart.
+  - Event rescheduling endpoint (`PATCH /api/organizer/{secret}`) with atomic cancellation/skipping of outdated reminders and rescheduling notices.
+  - Email templates (`backend/app/workers/templates.py`) formatting dates in UTC and Asia/Almaty timezones for tickets, promotions, 24h reminders, and rescheduling notices.
   - Pessimistic locking (`SELECT ... FOR UPDATE` with event-first lock order) ensuring safe concurrency under race conditions.
   - Comprehensive race condition and outbox delivery tests with barrier-synchronized concurrency.
 - **Not implemented yet:**
-  - Scheduler for 24h event reminders and event rescheduling notifications (Stage 5).
   - Single check-in logic, organizer participant views, and SSE live counters (Stage 6).
   - Frontend UI (Stage 7).
