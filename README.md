@@ -105,6 +105,8 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
 - **Ticket code in registration response:** The ticket code is returned directly in the registration API response, and there is no email confirmation sent on registration (this is a demo simplification; in a real product it would only be sent by email).
 - **In-process live-update bus:** The live-update notification bus is currently in-process, which limits backend deployment to a single uvicorn worker process.
 - **Outbox delivery window:** The transactional outbox has a small window between sending an email and marking it sent in the database (at-least-once delivery, deduplicated by the unique key constraint on `(registration_id, kind, dedup_key)`).
+- * Reminder subject says "in 24 hours": the reminder email subject always reads "in 24 hours", even when the event is less than a day away (for example, when someone registers or is promoted from the waitlist inside the 24-hour window).
+  * Scheduler/reschedule race: the scheduler tick does not lock the event row. If an organizer reschedules the event in the same instant a tick reads the old start time, a reminder for the old date may be queued after the old reminders were marked skipped. The window is very small.
 
 ## Current state
 
