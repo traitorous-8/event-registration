@@ -34,7 +34,7 @@ def create_event(payload: EventCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(event)
 
-    confirmed_count, waitlist_count, _ = get_event_counts(db, event.id)
+    confirmed_count, waitlist_count = get_event_counts(db, event.id)
 
     return EventCreateResponse(
         id=event.id,
@@ -54,7 +54,7 @@ def list_events(db: Session = Depends(get_db)):
     events = db.query(Event).order_by(Event.id.asc()).all()
     result = []
     for event in events:
-        confirmed_count, waitlist_count, _ = get_event_counts(db, event.id)
+        confirmed_count, waitlist_count = get_event_counts(db, event.id)
         result.append(
             EventResponse(
                 id=event.id,
@@ -79,7 +79,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
             detail="Event not found"
         )
 
-    confirmed_count, waitlist_count, _ = get_event_counts(db, event.id)
+    confirmed_count, waitlist_count = get_event_counts(db, event.id)
     return EventResponse(
         id=event.id,
         title=event.title,

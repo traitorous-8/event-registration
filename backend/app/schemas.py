@@ -43,41 +43,17 @@ class EventCreateResponse(EventResponse):
     organizer_secret: str
 
 
-class CheckInRequest(BaseModel):
-    ticket_code: str
-
-
-class CheckInResponse(BaseModel):
-    email: str
-    ticket_code: str
-    checked_in_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class ParticipantItem(BaseModel):
-    email: str
-    status: str
-    ticket_code: str
-    queued_at: datetime
-    checked_in_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class OrganizerEventResponse(BaseModel):
-    id: int
-    title: str
-    description: Optional[str] = None
+class EventReschedule(BaseModel):
     starts_at: datetime
-    capacity: int
-    created_at: datetime
-    confirmed_count: int
-    waitlist_count: int
-    checked_in_count: int
-    participants: list[ParticipantItem]
 
-    model_config = ConfigDict(from_attributes=True)
+    @field_validator("starts_at")
+    @classmethod
+    def validate_starts_at(cls, v: datetime) -> datetime:
+        if v.tzinfo is None or v.tzinfo.utcoffset(v) is None:
+            raise ValueError("starts_at must be timezone-aware")
+        if v <= datetime.now(timezone.utc):
+            raise ValueError("starts_at must be in the future")
+        return v
 
 
 class RegistrationCreate(BaseModel):

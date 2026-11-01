@@ -54,5 +54,41 @@ def build_email_content(
         )
         return subject, body
 
+    elif kind == "reminder_24h":
+        subject = f"Напоминание о мероприятии «{event_title}» через 24 часа"
+        status_label = "Подтверждено (место забронировано)" if registration_status == "confirmed" else registration_status
+        body = (
+            f"Здравствуйте!\n\n"
+            f"Напоминаем, что через 24 часа состоится мероприятие: «{event_title}»\n"
+            f"Время начала: {time_str}\n"
+            f"Код вашего билета: {ticket_code}\n"
+            f"Статус вашей регистрации: {status_label}\n\n"
+            f"Если ваши планы изменились, пожалуйста, освободите место:\n"
+            f"DELETE /api/tickets/{ticket_code}\n"
+        )
+        return subject, body
+
+    elif kind == "event_rescheduled":
+        subject = f"Перенос мероприятия «{event_title}»"
+        old_time_iso = payload.get("old_starts_at")
+        new_time_iso = payload.get("new_starts_at")
+
+        old_dt = datetime.fromisoformat(old_time_iso) if old_time_iso else event_starts_at
+        new_dt = datetime.fromisoformat(new_time_iso) if new_time_iso else event_starts_at
+
+        old_time_str = format_event_datetime(old_dt)
+        new_time_str = format_event_datetime(new_dt)
+
+        body = (
+            f"Здравствуйте!\n\n"
+            f"Обратите внимание: мероприятие «{event_title}» перенесено на новое время.\n"
+            f"Старое время: {old_time_str}\n"
+            f"Новое время: {new_time_str}\n"
+            f"Код вашего билета: {ticket_code}\n\n"
+            f"Если вам не подходит новая дата, вы можете отказаться от участия:\n"
+            f"DELETE /api/tickets/{ticket_code}\n"
+        )
+        return subject, body
+
     else:
         raise ValueError(f"Unknown notification kind: {kind}")
