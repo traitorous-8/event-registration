@@ -83,3 +83,8 @@
 - В docker-compose.yml добавлен сервис worker (зависит от postgres healthy и mailhog).
 - Тесты (backend/tests/test_stage4_outbox.py) на реальном in-process SMTP-сервере: доставка одного письма, два параллельных воркера без дублей, ретраи и переход в failed, доставка после восстановления SMTP, сквозной сценарий (3 письма: 2 ticket + 1 waitlist_promoted), пустой outbox, неизвестный kind.
 - Обновлены README.md и DEVLOG.md. Этап 4 пришёл в том же PR #3, что и этап 3.
+
+- ## 2026-11-01 17:50 (UTC+5) — Ручная проверка этапа 4
+- `git pull` и `docker compose up -d --build`: поднялись четыре контейнера (postgres, mailhog, backend, worker), `/health` отвечает.
+- Сценарий через Swagger: событие на 1 место, регистрация a@test.com и b@test.com, отмена билета a. В MailHog пришли три письма (ticket для a, ticket для b, waitlist_promoted для b), каждое один раз.
+- Накопившиеся в outbox письма вчерашнего теста (3 шт.) доставлены при первом запуске воркера: очередь пережила перезапуск.
