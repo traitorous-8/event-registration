@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     outbox_poll_seconds: float = 2.0
     outbox_batch_size: int = 20
     scheduler_poll_seconds: float = 30.0
+    sse_heartbeat_seconds: float = 15.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
