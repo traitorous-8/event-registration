@@ -77,6 +77,51 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
 - `OUTBOX_POLL_SECONDS`: Polling interval in seconds for the outbox worker (default: `2.0`).
 - `OUTBOX_BATCH_SIZE`: Batch size for picking pending notifications (default: `20`).
 - `SCHEDULER_POLL_SECONDS`: Polling interval in seconds for the reminder scheduler worker (default: `30.0`).
+- `SSE_HEARTBEAT_SECONDS`: Interval in seconds between SSE heartbeat ping comments (default: `15.0`).
+
+## Server-Sent Events (SSE) Live Updates
+
+The backend provides three Server-Sent Events (SSE) endpoints (media type `text/event-stream`):
+
+1. **Public Event Stream (`GET /api/events/{id}/stream`):**
+   - Streams event count snapshots: event `counts` with `{confirmed, waitlist}`.
+   - Example with curl:
+     ```bash
+     curl -N http://localhost:8000/api/events/1/stream
+     ```
+   - Stream output:
+     ```
+     event: counts
+     data: {"confirmed": 5, "waitlist": 2}
+     ```
+   - Public streams never contain emails, ticket codes, or organizer secrets.
+
+2. **Organizer Stream (`GET /api/organizer/{secret}/stream`):**
+   - Validates organizer secret in constant time (`secrets.compare_digest`); returns 404 before streaming if secret is invalid.
+   - Streams event `counts` with `{confirmed, waitlist, checked_in}` and event `participants` with the list of participants (email, status, ticket_code, queued_at, checked_in_at).
+   - Example with curl:
+     ```bash
+     curl -N http://localhost:8000/api/organizer/<secret>/stream
+     ```
+
+3. **Ticket Stream (`GET /api/tickets/{code}/stream`):**
+   - Returns 404 before streaming if ticket code is not found.
+   - Streams event `ticket` with `{status, position_in_waitlist}` for that single ticket.
+   - Example with curl:
+     ```bash
+     curl -N http://localhost:8000/api/tickets/<ticket_code>/stream
+     ```
+
+- **Snapshots and Heartbeats:**
+  - Upon connection, each stream immediately delivers a full snapshot.
+  - Whenever an event changes (registration, reactivation, cancellation/promotion, check-in, reschedule), a new snapshot is pushed to all subscribed streams.
+  - When idle, a heartbeat comment line (`: ping\n\n`) is emitted every `SSE_HEARTBEAT_SECONDS` (default: 15 seconds).
+  - Snapshot database reads run in threadpools with short-lived sessions to keep the async event loop non-blocking.
+  - Client disconnection cleans up subscriptions immediately.
+
+- **Single-Worker In-Process Bus Limitation:**
+  - The live-update pub/sub bus (`backend/app/events_bus.py`) is currently in-process using bounded asyncio queues (`maxsize=100`, oldest message dropped if full).
+  - Because pub/sub messages are dispatched in-process, uvicorn must run with a single worker (`workers=1`), as configured in `docker-compose.yml`. For multi-process horizontal scaling, an external broker or PostgreSQL `LISTEN`/`NOTIFY` would be used.
 
 ## Scheduler & Rescheduling
 
@@ -127,6 +172,6 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
   - Email templates (`backend/app/workers/templates.py`) formatting dates in UTC and Asia/Almaty timezones for tickets, promotions, 24h reminders, and rescheduling notices.
   - Pessimistic locking (`SELECT ... FOR UPDATE` with event-first lock order) ensuring safe concurrency under race conditions.
   - Comprehensive race condition, barrier-synchronized concurrency tests, and check-in tests.
+  - Server-Sent Events (SSE) live-update endpoints (`GET /api/events/{id}/stream`, `GET /api/organizer/{secret}/stream`, `GET /api/tickets/{code}/stream`) backed by an in-process event bus, heartbeat pings, and non-blocking database snapshot reads (Stage 6b).
 - **Not implemented yet:**
-  - SSE live counters and stream endpoints (Stage 6b).
   - Frontend UI (Stage 7).

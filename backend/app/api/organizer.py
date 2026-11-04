@@ -1,13 +1,19 @@
+import asyncio
+import json
 import secrets
 from datetime import timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import and_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from backend.app.db import get_db
+from backend.app.config import settings
+from backend.app.db import SessionLocal, get_db
 from backend.app.models import Event, Notification, Registration
 from sqlalchemy import func, text
+from backend.app.events_bus import bus
 from backend.app.schemas import (
     CheckInRequest,
     CheckInResponse,
@@ -153,6 +159,8 @@ def reschedule_event(
     db.commit()
     db.refresh(event)
 
+    bus.publish(event.id)
+
     confirmed_count, waitlist_count = get_event_counts(db, event.id)
     return EventResponse(
         id=event.id,
@@ -195,6 +203,7 @@ def checkin_participant(
 
     if result:
         db.commit()
+        bus.publish(event.id)
         return CheckInResponse(
             email=result["email"],
             ticket_code=result["ticket_code"],
@@ -297,4 +306,87 @@ def get_organizer_view(
         event=event_data,
         counters=counters,
         participants=participants,
+    )
+
+
+def _fetch_organizer_snapshot(event_id: int) -> tuple[dict, list[dict]]:
+    session = SessionLocal()
+    try:
+        confirmed_count, waitlist_count = get_event_counts(session, event_id)
+        checked_in_count = (
+            session.query(func.count(Registration.id))
+            .filter(
+                Registration.event_id == event_id,
+                Registration.status == "confirmed",
+                Registration.checked_in_at.isnot(None),
+            )
+            .scalar()
+            or 0
+        )
+
+        participants_rows = (
+            session.query(Registration)
+            .filter(Registration.event_id == event_id)
+            .order_by(Registration.queued_at.asc(), Registration.id.asc())
+            .all()
+        )
+
+        counts = {
+            "confirmed": confirmed_count,
+            "waitlist": waitlist_count,
+            "checked_in": checked_in_count,
+        }
+        participants = [
+            {
+                "email": r.email,
+                "status": r.status,
+                "ticket_code": r.ticket_code,
+                "queued_at": r.queued_at.isoformat(),
+                "checked_in_at": r.checked_in_at.isoformat() if r.checked_in_at else None,
+            }
+            for r in participants_rows
+        ]
+        return counts, participants
+    finally:
+        session.close()
+
+
+@router.get("/{secret}/stream")
+async def organizer_stream(secret: str, request: Request, db: Session = Depends(get_db)):
+    event = _get_event_by_secret(db, secret)
+    event_id = event.id
+
+    loop, queue = bus.subscribe(event_id)
+
+    async def organizer_generator():
+        try:
+            # Immediate snapshot on connect
+            counts, participants = await run_in_threadpool(_fetch_organizer_snapshot, event_id)
+            yield f"event: counts\ndata: {json.dumps(counts)}\n\n"
+            yield f"event: participants\ndata: {json.dumps(participants)}\n\n"
+
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    await asyncio.wait_for(queue.get(), timeout=settings.sse_heartbeat_seconds)
+                    counts, participants = await run_in_threadpool(_fetch_organizer_snapshot, event_id)
+                    yield f"event: counts\ndata: {json.dumps(counts)}\n\n"
+                    yield f"event: participants\ndata: {json.dumps(participants)}\n\n"
+                except asyncio.TimeoutError:
+                    if await request.is_disconnected():
+                        break
+                    yield ": ping\n\n"
+        finally:
+            bus.unsubscribe(event_id, loop, queue)
+
+    return StreamingResponse(
+        organizer_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
