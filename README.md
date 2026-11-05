@@ -42,6 +42,44 @@ Service for event registration with capacity limits, waitlist, unique ticket cod
    - `GET /api/organizer/{secret}` -> Organizer view with event details, live counters (`confirmed`, `waitlist`, `checked_in`), and participant list ordered by `(queued_at, id)`
    - `PATCH /api/organizer/{secret}` -> Reschedule event (`{starts_at}`)
 
+## Frontend
+
+The frontend is a single-page application built with React 18, Vite, and React Router 6, communicating with the backend over relative `/api` paths with plain CSS styling.
+
+### Pages
+- `/` — Список мероприятий: просмотр всех событий с текущими счётчиками мест и форма создания нового мероприятия. После создания выводится ссылка организатора (`/organizer/:secret`) с кнопкой копирования и предупреждением о безопасности.
+- `/events/:id` — Страница мероприятия: детали, время старта в локальном часовом поясе, live-счётчики мест через SSE (`/api/events/:id/stream`), форма регистрации по email, отображение выданного билета и сохранение билетов в `localStorage`.
+- `/ticket/:code` — Страница билета: статус билета и позиция в очереди в реальном времени (`/api/tickets/:code/stream`), кнопка добровольного отказа от участия с диалогом подтверждения и обработкой блокировки отмены после чекина (409).
+- `/organizer/:secret` — Панель организатора: live-счётчики (`confirmed`, `waitlist`, `checked_in`) и таблица участников через SSE (`/api/organizer/:secret/stream`), форма быстрой отметки входа (чек-ин по коду билета), форма переноса даты события (`PATCH`), и экран запрета доступа при неверном секрете (404).
+
+### Running with Docker Compose
+Frontend запускается в docker-compose на порту `3000`:
+```bash
+docker compose up --build
+```
+Интерфейс доступен по адресу `http://localhost:3000`. Запросы к `/api/` проксируются через Nginx на `http://backend:8000` с отключённым буферизированием (`proxy_buffering off; proxy_cache off;`) и увеличенным таймаутом чтения (`proxy_read_timeout 3600s;`), что обеспечивает стабильную работу Server-Sent Events (SSE) без разрывов потока.
+
+### Running Frontend Locally (npm)
+1. Установите зависимости и запустите dev-сервер:
+   ```bash
+   cd frontend
+   npm ci
+   npm run dev
+   ```
+   Dev-сервер Vite стартует на `http://localhost:3000` и настроен на проксирование `/api` на `http://localhost:8000`.
+
+2. Запуск тестов фронтенда:
+   ```bash
+   cd frontend
+   npm test
+   ```
+
+3. Сборка продакшен-бандла:
+   ```bash
+   cd frontend
+   npm run build
+   ```
+
 ## Local Development & Running Tests
 
 1. Create a Python virtual environment and install dependencies:
@@ -173,5 +211,6 @@ The backend provides three Server-Sent Events (SSE) endpoints (media type `text/
   - Pessimistic locking (`SELECT ... FOR UPDATE` with event-first lock order) ensuring safe concurrency under race conditions.
   - Comprehensive race condition, barrier-synchronized concurrency tests, and check-in tests.
   - Server-Sent Events (SSE) live-update endpoints (`GET /api/events/{id}/stream`, `GET /api/organizer/{secret}/stream`, `GET /api/tickets/{code}/stream`) backed by an in-process event bus, heartbeat pings, and non-blocking database snapshot reads (Stage 6b).
+  - React 18 single-page frontend application (`frontend/`) with live SSE counters, event creation, registration, ticket view/cancellation, and organizer dashboard with check-in and rescheduling (Stage 7).
 - **Not implemented yet:**
-  - Frontend UI (Stage 7).
+  - None (all MVP backend, outbox, scheduler, SSE, and frontend stages completed).

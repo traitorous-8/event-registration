@@ -45,3 +45,29 @@ jobs:
         run: |
           cd backend
           python -m pytest -v
+
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run tests
+        run: |
+          cd frontend
+          npm test
+
+      - name: Build
+        run: |
+          cd frontend
+          npm run build
