@@ -2,6 +2,54 @@
 
 Service for event registration with capacity limits, waitlist, unique ticket codes, check-in, live counters, and email notifications via outbox.
 
+## For Reviewers (Mad Devs, Task 9)
+
+### What we built it with and why
+- **Claude** (claude.ai chat) acted as systems analyst and reviewer: wrote the specification (SPEC.md), made architecture decisions, wrote the prompts for Jules, reviewed every PR and helped with debugging. Chosen for careful requirements work and code analysis.
+- **Google Jules** acted as the engineer: implements a task from a ready prompt asynchronously and opens a PR on GitHub. Chosen because every task arrives as a PR with commit history, which gives a verifiable course of work.
+- The repository owner sets the tasks, checks every PR (changed files, test count, CI), merges, and verifies the result by hand on a running stack.
+
+### Prompts, decision log and timeline
+- Prompts for Jules: `docs/prompts/` (one file per task, including the failed attempts of stages 6 and 7).
+- Decision log and timeline with timestamps: `DEVLOG.md`, including incidents (stage 6a deleted the stage 5 code and was rolled back with `git revert`; a Jules error with `node_modules` in stage 7).
+- Agent session exports (jsonl) are not attached; prompts and DEVLOG are provided instead. Commit and PR history (#1-#9) shows that the work was incremental.
+- Some prompt files were committed after the tasks were started; this is noted in the commit messages and in DEVLOG.
+
+### How to run
+Requires Docker and Docker Compose.
+
+    git clone https://github.com/traitorous-8/event-registration.git
+    cd event-registration
+    docker compose up -d --build
+
+- Frontend: http://localhost:3000
+- API and Swagger: http://localhost:8000/docs
+- Emails (MailHog): http://localhost:8025
+- Containers: postgres, mailhog, backend, worker (email delivery), scheduler (reminders), frontend.
+- Tests: backend `cd backend && pytest -v` (58 tests, needs a test database, see the section above); frontend `cd frontend && npm test`.
+
+### Project status
+**Works** (verified by automated tests and by hand on Docker Desktop, Windows):
+- events with a seat limit, registration by email without duplicates, waitlist, ticket with a code, cancellation with automatic promotion of the first person in the queue;
+- race protection: event row lock, unique indexes, atomic check-in (verified by parallel tests);
+- emails through an outbox (ticket, seat from the waitlist, 24-hour reminder, event reschedule), exactly one per event;
+- check-in by ticket code, organizer screen (counters, participants list, reschedule);
+- live updates over SSE: counters, participants list and ticket status change in several open tabs without a page reload;
+- React client (separate container, nginx proxies /api to the backend, SSE without buffering).
+
+**Not done / limitations:** see "Known limitations" above. Additionally: there is no login or roles (the organizer is identified by a secret link shown only once); the frontend has minimal styling and no browser e2e tests; Jules could not run docker compose in its sandbox, so the stack was verified manually by the owner.
+
+### What we would do next
+1. Email confirmation, with the ticket code delivered only by email (currently it is returned in the registration response).
+2. Postgres `LISTEN/NOTIFY` instead of the in-process bus, so several backend workers can run.
+3. Organizer login (account or one-time link with revocation) instead of a permanent secret in the URL.
+4. Reminder subject based on the real time left, and closing the narrow race window between the scheduler and event rescheduling.
+5. Browser e2e tests (Playwright), UI polish and accessibility.
+6. Rate limiting for registration requests and monitoring of the email queue.
+
+### Third-party solutions and templates
+No ready-made project templates or generators were used. Open-source libraries: FastAPI, SQLAlchemy, Alembic, PostgreSQL, React, Vite, react-router-dom, aiosmtpd, MailHog. [If Jules created the frontend scaffold with `npm create vite`, add that here.]
+
 ## Tech Stack
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy 2, Alembic
